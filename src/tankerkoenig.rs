@@ -168,7 +168,7 @@ impl TankerKoenig {
         match (result.ok, result.stations) {
             (true, Some(stations)) => Ok(stations
                 .into_iter()
-                .map(|api_resp| TankerStation::from(api_resp))
+                .map(TankerStation::from)
                 .collect()),
             _ => Err(TankerError::APIError(result.message)),
         }

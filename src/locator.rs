@@ -6,7 +6,7 @@ use std::num::ParseFloatError;
 use std::str::FromStr;
 
 fn sexagesimal_to_decimal(degree: f64, minutes: Option<f64>, seconds: Option<f64>) -> f64 {
-    return degree + minutes.unwrap_or(0.) / 60. + seconds.unwrap_or(0.) / 60. / 60.;
+    degree + minutes.unwrap_or(0.) / 60. + seconds.unwrap_or(0.) / 60. / 60.
 }
 
 #[derive(Deserialize)]
@@ -88,7 +88,7 @@ impl Location {
                 let locations = reqwest::Client::new()
                     .get("https://nominatim.openstreetmap.org/search")
                     .header(reqwest::header::USER_AGENT, "tanker_price")
-                    .query(&[("format", "json"), ("q", &name)])
+                    .query(&[("format", "json"), ("q", name)])
                     .send()
                     .await?
                     .json::<Vec<OSMLocation>>()
