@@ -1,17 +1,29 @@
-use serde::Deserialize;
+//! Abstraction for the Tankerkönig API
+//! 
+//! This abstracts away the [Tankerkönig API](https://creativecommons.tankerkoenig.de/) and allows
+//! loading prices from the API.
 
+use serde::Deserialize;
 use crate::locator::{self, CoordinateLocation};
 use std::error::Error;
 use std::fmt::{self, Display};
 
+/// A Tankerkönig station with all required information including prices
 #[derive(Debug)]
 pub struct TankerStation {
+    /// ID of the station (as provided by the Tankerkönig API)
     pub id: String,
+    /// Name of the station
     pub name: String,
+    /// Brand of the station
     pub brand: String,
+    /// Is the station currently open?
     pub is_open: bool,
+    /// Distance from the search center
     pub dist: f64,
+    /// The fuel prices of this station
     pub prices: Vec<TankerPrice>,
+    /// The location of this station
     pub location: CoordinateLocation
 }
 
@@ -57,10 +69,14 @@ impl From<TankerAPIStation> for TankerStation {
     }
 }
 
+/// Available fuel types
 #[derive(Debug)]
 pub enum TankerFuelType {
+    /// Fuel with 10% ethanol
     E10,
+    /// Fuel with 5% ethanol
     E5,
+    /// Diesel fuel
     Diesel,
 }
 
@@ -84,9 +100,12 @@ impl From<TankerFuelType> for String {
   }
 }
 
+/// A price entry for a single fuel type
 #[derive(Debug)]
 pub struct TankerPrice {
+    /// The fuel type of this
     pub fuel_type: TankerFuelType,
+    /// Price for this fuel
     pub price: f64,
 }
 
@@ -96,9 +115,12 @@ impl Display for TankerPrice {
     }
 }
 
+/// Possible errors of the Tankerkönig API
 #[derive(Debug)]
 pub enum TankerError {
+    /// There was a connection error to the API
     ReqwestError(reqwest::Error),
+    /// The API threw an error
     APIError(Option<String>),
 }
 
@@ -116,26 +138,41 @@ impl From<reqwest::Error> for TankerError {
     }
 }
 
+/// Struct for deserializing the Tankerkönig API response
 #[derive(Deserialize)]
 struct TankerAPIResponse {
+    /// Is the response successful?
     ok: bool,
+    /// Stations of the response
     stations: Option<Vec<TankerAPIStation>>,
+    /// Optional error message
     message: Option<String>,
 }
 
+/// A struct for deserialization of the Tankerkönig API response
 #[derive(Deserialize)]
 struct TankerAPIStation {
+    /// ID of the station in the Tankerkönig API
     id: String,
+    /// name of the station
     name: String,
+    /// Brand of the station
     brand: String,
     // street: String,
     // place: String,
+    /// latitude of the station
     lat: f64,
+    /// longitude of the station
     lng: f64,
+    /// distance from search center
     dist: f64,
+    /// price for one liter diesel
     diesel: f64,
+    /// price for one liter e5
     e5: f64,
+    /// price for one liter e10
     e10: f64,
+    /// Is the station currently open?
     #[serde(rename(deserialize = "isOpen"))]
     is_open: bool,
     // #[serde(rename(deserialize = "houseNumber"))]
@@ -144,18 +181,26 @@ struct TankerAPIStation {
     // post_code: u32,
 }
 
+/// An abstraction for the TankerKoenig API.
+/// 
+/// It binds your API key, location and search radius.
 pub struct TankerKoenig {
+    /// API Key from the Tankerkönig API. You can get yours on the [Tankerkönig API page](https://creativecommons.tankerkoenig.de/)
     pub api_key: String,
+    /// Radius in km around the location
     pub radius: f64,
+    /// Location (center point) of your search area
     pub location: locator::CoordinateLocation,
 }
 
 impl TankerKoenig {
+    /// Load the prices for the current TankerKoenig instance.
     pub async fn load_prices(&self) -> Result<Vec<TankerStation>, TankerError> {
         let result = reqwest::Client::new()
             .get("https://creativecommons.tankerkoenig.de/json/list.php")
             .header(reqwest::header::USER_AGENT, "tanker_price")
-            .query(&[("type", "all"), ("apikey", &self.api_key)])
+            .query(&[("type"
+            , "all"), ("apikey", &self.api_key)])
             .query(&[
                 ("lat", self.location.lat),
                 ("lng", self.location.long),

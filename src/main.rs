@@ -1,3 +1,13 @@
+#![deny(
+    warnings,
+    unsafe_code,
+    missing_docs,
+    clippy::missing_docs_in_private_items
+)]
+
+//! Exposes a prometheus exporter for the [Tankerkönig API](https://creativecommons.tankerkoenig.de/)
+//! which is also able to resolve locations using the [Nominatim openstreetmap.org API](https://nominatim.openstreetmap.org/ui/search.html).
+
 use std::{net::SocketAddr, time::Duration};
 
 use crate::tankerkoenig::TankerKoenig;
@@ -12,27 +22,22 @@ use tokio::time;
 mod locator;
 mod tankerkoenig;
 
+/// Validate the update timings
 fn arg_validate_update_time(time: &str) -> Result<u64, String> {
-    if let Ok(time) = time.parse() {
-        if time >= 5 * 60 {
-            Ok(time)
-        } else {
-            Err("Your update cycle is shorter than five minutes. You have to use at least five minutes (300s) to comply with the Tankerkönig API Terms.".to_string())
-        }
-    } else {
-        Err("The update cycle was not a valid integer!".to_string())
+    match time.parse() {
+        Ok(t) if t >= 5 * 60 => Ok(t),
+        Ok(t) => Err(format!("Your update cycle {t} is shorter than five minutes. You have to use at least five minutes (300s) to comply with the Tankerkönig API Terms.")),
+        Err(_) => Err("Your update time is not a valid (unsigned) integer!".to_string()),
     }
 }
 
+/// Make sure that the provided radius conforms to the Tankerkönig API limitations
 fn arg_validate_radius(radius: &str) -> Result<f64, String> {
-    if let Ok(radius) = radius.parse() {
-        if radius <= 25. {
-            Ok(radius)
-        } else {
-            Err("Your search radius is larger than 25km, which is not allowed by the Tankerkönig API. Please choose a radius <= 25.".to_string())
-        }
-    } else {
-        Err("The radius was not a valid floating point number!".to_string())
+    match radius.parse() {
+        Err(_) => Err("The radius is not a valid floating point number!".to_string()),
+        Ok(r) if r < 0. => Err(format!("The provided radius {r} is less than 0!")),
+        Ok(r) if r <= 25. => Ok(r),
+        Ok(r) => Err(format!("The provided radius {r} is larger than 25km, which is not allowed by the Tankerkönig API. Please choose a radius <= 25.")),
     }
 }
 
@@ -57,14 +62,17 @@ struct Args {
     #[clap(short, long, env, default_value_t = 300, parse(try_from_str=arg_validate_update_time))]
     update_interval: u64,
 
+    /// Namespace for all prometheus metrics
     #[clap(short = 'n', long, env, default_value = "tanker_price")]
     prometheus_namespace: String,
 
+    /// Socket address to bind to for the prometheus endpoint
     #[clap(long, env, default_value = "0.0.0.0:3000")]
     listen: SocketAddr,
 }
 
-pub async fn metrics() -> impl IntoResponse {
+/// Expose the prometheus metrics
+async fn metrics() -> impl IntoResponse {
     let encoder = TextEncoder::new();
     let mut buffer = vec![];
     encoder

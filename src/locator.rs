@@ -1,3 +1,5 @@
+//! Allows parsing and resolving locations with the openstreetmap API
+
 use regex::Regex;
 use serde::Deserialize;
 use std::error::Error;
@@ -5,40 +7,55 @@ use std::fmt;
 use std::num::ParseFloatError;
 use std::str::FromStr;
 
+/// Convert a sexagesimal coordinate to a decimal one.
 fn sexagesimal_to_decimal(degree: f64, minutes: Option<f64>, seconds: Option<f64>) -> f64 {
     degree + minutes.unwrap_or(0.) / 60. + seconds.unwrap_or(0.) / 60. / 60.
 }
 
+/// Location of Open Street Maps
 #[derive(Deserialize)]
 struct OSMLocation {
+    /// Latitude
     lat: String,
+    /// Longitude
     lon: String,
 }
 
+/// Possible compass directions
 #[derive(PartialEq, Eq)]
 enum CompassDirection {
+    /// North
     North,
+    /// East
     East,
+    /// South
     South,
+    /// West
     West,
 }
 
 impl From<&str> for CompassDirection {
     fn from(dir: &str) -> Self {
-        match dir {
-            "N" => CompassDirection::North,
-            "E" => CompassDirection::East,
-            "S" => CompassDirection::South,
-            "W" => CompassDirection::West,
+        match &dir.to_uppercase()[..] {
+            "N" | "NORTH" => CompassDirection::North,
+            "E" | "EAST" => CompassDirection::East,
+            "S" | "SOUTH" => CompassDirection::South,
+            "W" | "WEST" => CompassDirection::West,
             _ => unreachable!(),
         }
     }
 }
+
+/// Possible errors when creating a location
 #[derive(Debug)]
 pub enum LocationError {
+    /// The location was malformed and can't be used
     Malformed,
+    /// There was an error parsing a float
     ParseFloatError(ParseFloatError),
+    /// There was a problem connecting to the API
     ReqwestError(reqwest::Error),
+    /// The location can't be resolved by the Openstreetmaps API
     Unresolveable,
 }
 
@@ -62,9 +79,14 @@ impl From<reqwest::Error> for LocationError {
     }
 }
 
+/// A coordinate location (as returned by the resolve_to_coordinates location)
+///
+/// You probably don't want to create this, but use the Location struct instead
 #[derive(Debug, Clone)]
 pub struct CoordinateLocation {
+    /// Longitude
     pub long: f64,
+    /// Latitude
     pub lat: f64,
 }
 
@@ -74,13 +96,22 @@ impl fmt::Display for CoordinateLocation {
     }
 }
 
+/// A location which can describe a place either as a coordinate or an abstract location like an address
 #[derive(Debug, Clone)]
 pub enum Location {
+    /// A coordinates location
     Coordinates(CoordinateLocation),
+    /// A named coordinates (anything that is not a coordinate location already)
+    /// Can be resolved to a coordinate location with resolve_to_coordinates()
     Named(String),
 }
 
 impl Location {
+    /// Resolve a location to coordinates.
+    ///
+    /// If the location is already coordinates, it returns a clone,
+    /// otherwise it uses the [Nominatim API](https://nominatim.openstreetmap.org/) to resolve the location
+    /// to coordinates.
     pub async fn resolve_to_coordinates(&self) -> Result<CoordinateLocation, LocationError> {
         match self {
             Location::Coordinates(coordinates) => Ok(coordinates.clone()),
