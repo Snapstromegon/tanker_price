@@ -8,7 +8,7 @@
 //! Exposes a prometheus exporter for the [Tankerkönig API](https://creativecommons.tankerkoenig.de/)
 //! which is also able to resolve locations using the [Nominatim openstreetmap.org API](https://nominatim.openstreetmap.org/ui/search.html).
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, str::FromStr, time::Duration};
 
 use crate::tankerkoenig::TankerKoenig;
 use axum::{
@@ -18,8 +18,9 @@ use axum::{
 };
 use clap::Parser;
 use prometheus::{register_gauge, register_gauge_vec, Encoder, TextEncoder};
+use recoord::Coordinate;
 use tokio::time;
-mod locator;
+// mod locator;
 mod tankerkoenig;
 
 /// Validate the update timings
@@ -48,7 +49,7 @@ fn arg_validate_radius(radius: &str) -> Result<f64, String> {
 struct Args {
     /// Location to search prices for
     #[clap(short, long, env)]
-    location: locator::Location,
+    location: String,
 
     /// Radius around location to search
     #[clap(short, long, env, default_value_t = 2., parse(try_from_str=arg_validate_radius))]
@@ -125,14 +126,18 @@ async fn main() {
     )
     .unwrap();
 
-    let coordinates = args.location.resolve_to_coordinates().await.unwrap();
+    let coordinates = if let Ok(coordinates) = Coordinate::from_str(&args.location) {
+        coordinates
+    } else {
+        recoord::resolvers::nominatim::resolve(&args.location).await.unwrap()
+    };
 
+    println!("Searching for location {:?}", coordinates);
     let tk = TankerKoenig {
         api_key: args.tankerkoenig_key,
         radius: args.radius,
-        location: coordinates.clone(),
+        location: coordinates,
     };
-    println!("Searching for location {:?}", coordinates);
 
     let updater = tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(args.update_interval));
@@ -159,7 +164,7 @@ async fn main() {
                     .set(station.location.lat);
                 loc_long
                     .with_label_values(&[&station.name, &station.brand, &station.id])
-                    .set(station.location.long);
+                    .set(station.location.lng);
                 for price in &station.prices {
                     fuel_prices
                         .with_label_values(&[

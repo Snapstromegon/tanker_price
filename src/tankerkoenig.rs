@@ -1,10 +1,10 @@
 //! Abstraction for the Tankerkönig API
-//! 
+//!
 //! This abstracts away the [Tankerkönig API](https://creativecommons.tankerkoenig.de/) and allows
 //! loading prices from the API.
 
+use recoord::Coordinate;
 use serde::Deserialize;
-use crate::locator::{self, CoordinateLocation};
 use std::error::Error;
 use std::fmt::{self, Display};
 
@@ -24,7 +24,7 @@ pub struct TankerStation {
     /// The fuel prices of this station
     pub prices: Vec<TankerPrice>,
     /// The location of this station
-    pub location: CoordinateLocation
+    pub location: Coordinate,
 }
 
 impl Display for TankerStation {
@@ -50,21 +50,19 @@ impl From<TankerAPIStation> for TankerStation {
             brand: api_resp.brand,
             is_open: api_resp.is_open,
             dist: api_resp.dist,
-            prices: vec![
-                TankerPrice {
-                    fuel_type: TankerFuelType::Diesel,
-                    price: api_resp.diesel,
-                },
-                TankerPrice {
-                    fuel_type: TankerFuelType::E5,
-                    price: api_resp.e5,
-                },
-                TankerPrice {
-                    fuel_type: TankerFuelType::E10,
-                    price: api_resp.e10,
-                },
-            ],
-            location: CoordinateLocation { long: api_resp.lng, lat: api_resp.lat }
+            prices: [
+                (TankerFuelType::Diesel, api_resp.diesel),
+                (TankerFuelType::E5, api_resp.e5),
+                (TankerFuelType::E10, api_resp.e10),
+            ].into_iter()
+            .filter_map(|(fuel_type, price)| {
+                price.and_then(|price| Some(TankerPrice { fuel_type, price }))
+            }).into_iter()
+            .collect(),
+            location: Coordinate {
+                lng: api_resp.lng,
+                lat: api_resp.lat,
+            },
         }
     }
 }
@@ -91,13 +89,13 @@ impl Display for TankerFuelType {
 }
 
 impl From<TankerFuelType> for String {
-  fn from(fuel_type: TankerFuelType) -> Self {
-    match fuel_type {
-      TankerFuelType::Diesel => "Diesel".to_string(),
-      TankerFuelType::E10 => "E10".to_string(),
-      TankerFuelType::E5 => "E5".to_string(),
+    fn from(fuel_type: TankerFuelType) -> Self {
+        match fuel_type {
+            TankerFuelType::Diesel => "Diesel".to_string(),
+            TankerFuelType::E10 => "E10".to_string(),
+            TankerFuelType::E5 => "E5".to_string(),
+        }
     }
-  }
 }
 
 /// A price entry for a single fuel type
@@ -167,11 +165,11 @@ struct TankerAPIStation {
     /// distance from search center
     dist: f64,
     /// price for one liter diesel
-    diesel: f64,
+    diesel: Option<f64>,
     /// price for one liter e5
-    e5: f64,
+    e5: Option<f64>,
     /// price for one liter e10
-    e10: f64,
+    e10: Option<f64>,
     /// Is the station currently open?
     #[serde(rename(deserialize = "isOpen"))]
     is_open: bool,
@@ -182,7 +180,7 @@ struct TankerAPIStation {
 }
 
 /// An abstraction for the TankerKoenig API.
-/// 
+///
 /// It binds your API key, location and search radius.
 pub struct TankerKoenig {
     /// API Key from the Tankerkönig API. You can get yours on the [Tankerkönig API page](https://creativecommons.tankerkoenig.de/)
@@ -190,31 +188,31 @@ pub struct TankerKoenig {
     /// Radius in km around the location
     pub radius: f64,
     /// Location (center point) of your search area
-    pub location: locator::CoordinateLocation,
+    pub location: Coordinate,
 }
 
 impl TankerKoenig {
     /// Load the prices for the current TankerKoenig instance.
     pub async fn load_prices(&self) -> Result<Vec<TankerStation>, TankerError> {
-        let result = reqwest::Client::new()
+        let client = reqwest::Client::new();
+        let request = client
             .get("https://creativecommons.tankerkoenig.de/json/list.php")
             .header(reqwest::header::USER_AGENT, "tanker_price")
-            .query(&[("type"
-            , "all"), ("apikey", &self.api_key)])
+            .query(&[("type", "all"), ("apikey", &self.api_key)])
             .query(&[
                 ("lat", self.location.lat),
-                ("lng", self.location.long),
+                ("lng", self.location.lng),
                 ("rad", self.radius),
             ])
-            .send()
+            .build()?;
+        println!("Requesting {}", request.url());
+        let result = client
+            .execute(request)
             .await?
             .json::<TankerAPIResponse>()
             .await?;
         match (result.ok, result.stations) {
-            (true, Some(stations)) => Ok(stations
-                .into_iter()
-                .map(TankerStation::from)
-                .collect()),
+            (true, Some(stations)) => Ok(stations.into_iter().map(TankerStation::from).collect()),
             _ => Err(TankerError::APIError(result.message)),
         }
     }

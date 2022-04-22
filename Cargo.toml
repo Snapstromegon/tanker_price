@@ -11,5 +11,6 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "3.1.8", features = ["derive", "env"] }
 regex = "1.5"
 serde = { version = "1.0", features = ["derive"] }
+recoord = { version = "0.2", features = ["all", "format_dd"] }
 prometheus = "0.13.0"
 axum = "0.5.0"
