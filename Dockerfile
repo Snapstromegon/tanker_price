@@ -1,4 +1,4 @@
-FROM rust:1.59 as builder
+FROM rust:1.60 as builder
 WORKDIR /usr/src
 RUN apt-get update && \
   apt-get dist-upgrade -y && \
@@ -8,7 +8,6 @@ RUN apt-get update && \
     build-essential \
     musl-dev \
     musl-tools \
-    libssl-dev \
     pkgconf \
     curl \
     zip \
@@ -19,10 +18,10 @@ WORKDIR /usr/src/tanker_price
 COPY Cargo.toml Cargo.lock ./
 # RUN cargo install --target x86_64-unknown-linux-musl --path .
 COPY src ./src
-RUN cargo install --path .
-# RUN cargo install --target x86_64-unknown-linux-musl --path .
+# RUN cargo install --path .
+RUN cargo install --target x86_64-unknown-linux-musl --path .
 
-FROM ubuntu
+FROM scratch
 COPY --from=builder /usr/local/cargo/bin/tanker_price .
 USER 1000
-CMD ["./tanker_price"]
+ENTRYPOINT ["./tanker_price"]
