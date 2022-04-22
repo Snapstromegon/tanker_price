@@ -205,7 +205,6 @@ impl TankerKoenig {
                 ("rad", self.radius),
             ])
             .build()?;
-        println!("Requesting {}", request.url());
         let result = client
             .execute(request)
             .await?
