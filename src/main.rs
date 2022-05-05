@@ -45,7 +45,7 @@ fn arg_validate_radius(radius: &str) -> Result<f64, String> {
 /// Tankerkönig interface which is also able to resolve Open Street Map locations
 /// and exports the data as prometheus metrics
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None, )]
+#[clap(author, version, about, long_about = None)]
 struct Args {
     /// Location to search prices for
     #[clap(short, long, env)]
@@ -68,7 +68,7 @@ struct Args {
     prometheus_namespace: String,
 
     /// Socket address to bind to for the prometheus endpoint
-    #[clap(long, env, default_value = "0.0.0.0:3000")]
+    #[clap(long, env, default_value = "0.0.0.0:9501")]
     listen: SocketAddr,
 }
 
