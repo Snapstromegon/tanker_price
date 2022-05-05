@@ -14,7 +14,7 @@ You can configure the tool via these options:
 | --tankerkoenig-key     | -k       | TANKERKOENIG_KEY     | String | Tankerkönig API Key                                         | -               |
 | --location             | -l       | LOCATION             | String | Text description of the current location                    | -               |
 | --radius               | -r       | RADIUS               | f64    | Radius around location in km to include in search (max. 25) | 2               |
-| --prometheus_namespace | -n       | PROMETHEUS_NAMESPACE | String | Namespace/prefix for prometheus metrics                     | tankerkoenig    |
+| --prometheus_namespace | -n       | PROMETHEUS_NAMESPACE | String | Namespace/prefix for prometheus metrics                     | tanker_price    |
 | --listen               | -i       | LISTEN               | String | Interface to listen on                                      | 0.0.0.0:9501    |
 
 ## Get an API Key
