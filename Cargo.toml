@@ -14,3 +14,5 @@ serde = { version = "1.0", features = ["derive"] }
 recoord = { version = "0.2", features = ["all", "format_dd", "rustls-tls"], default-features = false }
 prometheus = "0.13.0"
 axum = "0.5.0"
+log = "0.4.17"
+env_logger = "0.9.0"

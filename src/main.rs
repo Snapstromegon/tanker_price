@@ -8,7 +8,9 @@
 //! Exposes a prometheus exporter for the [Tankerkönig API](https://creativecommons.tankerkoenig.de/)
 //! which is also able to resolve locations using the [Nominatim openstreetmap.org API](https://nominatim.openstreetmap.org/ui/search.html).
 
+use log::info;
 use std::{net::SocketAddr, str::FromStr, time::Duration};
+use tokio::time;
 
 use crate::tankerkoenig::TankerKoenig;
 use axum::{
@@ -19,8 +21,6 @@ use axum::{
 use clap::Parser;
 use prometheus::{register_gauge, register_gauge_vec, Encoder, TextEncoder};
 use recoord::Coordinate;
-use tokio::time;
-// mod locator;
 mod tankerkoenig;
 
 /// Validate the update timings
@@ -88,95 +88,31 @@ async fn metrics() -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
     let args = Args::parse();
-
-    let fuel_prices = register_gauge_vec!(
-        format!("{}_fuel_price", args.prometheus_namespace),
-        "Price of each fuel type",
-        &["name", "brand", "id", "fuel_type"]
-    )
-    .unwrap();
-    let is_open = register_gauge_vec!(
-        format!("{}_is_open", args.prometheus_namespace),
-        "Is gas station currently open?",
-        &["name", "brand", "id"]
-    )
-    .unwrap();
-    let distance = register_gauge_vec!(
-        format!("{}_distance_km", args.prometheus_namespace),
-        "Distance from reference point",
-        &["name", "brand", "id"]
-    )
-    .unwrap();
-    let loc_long = register_gauge_vec!(
-        format!("{}_location_long", args.prometheus_namespace),
-        "Longitude of station",
-        &["name", "brand", "id"]
-    )
-    .unwrap();
-    let loc_lat = register_gauge_vec!(
-        format!("{}_location_lat", args.prometheus_namespace),
-        "Latitude of station",
-        &["name", "brand", "id"]
-    )
-    .unwrap();
-    let last_update = register_gauge!(
-        format!("{}_update", args.prometheus_namespace),
-        "Last update in seconds"
-    )
-    .unwrap();
 
     let coordinates = if let Ok(coordinates) = Coordinate::from_str(&args.location) {
         coordinates
     } else {
-        recoord::resolvers::nominatim::resolve(&args.location).await.unwrap()
+        recoord::resolvers::nominatim::resolve(&args.location)
+            .await
+            .expect("Unable to resolve Location!")
     };
 
-    println!("Searching for location {:?}", coordinates);
+    info!("Searching at location {:?}", coordinates);
     let tk = TankerKoenig {
         api_key: args.tankerkoenig_key,
         radius: args.radius,
         location: coordinates,
     };
 
-    let updater = tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(args.update_interval));
-        loop {
-            interval.tick().await;
-            println!("Fetching prices...");
-            let stations = tk.load_prices().await.unwrap();
-            last_update.set(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs_f64(),
-            );
+    let (updater_shutdown_tx, updater_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (server_shutdown_tx, server_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-            for station in &stations {
-                is_open
-                    .with_label_values(&[&station.name, &station.brand, &station.id])
-                    .set(if station.is_open { 1. } else { 0. });
-                distance
-                    .with_label_values(&[&station.name, &station.brand, &station.id])
-                    .set(station.dist);
-                loc_lat
-                    .with_label_values(&[&station.name, &station.brand, &station.id])
-                    .set(station.location.lat);
-                loc_long
-                    .with_label_values(&[&station.name, &station.brand, &station.id])
-                    .set(station.location.lng);
-                for price in &station.prices {
-                    fuel_prices
-                        .with_label_values(&[
-                            &station.name,
-                            &station.brand,
-                            &station.id,
-                            &price.fuel_type.to_string(),
-                        ])
-                        .set(price.price);
-                }
-            }
-            println!("Update Done!");
+    let updater = tokio::spawn(async move {
+        tokio::select! {
+            _ = updater_loop(tk, args.prometheus_namespace, Duration::from_secs(args.update_interval)) => {},
+            _ = updater_shutdown_rx => {info!("Shutting Down Updater")}
         }
     });
 
@@ -184,9 +120,115 @@ async fn main() {
         .route("/metrics", get(metrics))
         .route("/", get(|| async { Redirect::permanent("/metrics") }));
 
-    let server = axum::Server::bind(&args.listen).serve(app.into_make_service());
+    info!("Starting Server...");
+    let server = axum::Server::bind(&args.listen)
+        .serve(app.into_make_service())
+        .with_graceful_shutdown(async {
+            server_shutdown_rx.await.ok();
+        });
 
-    let (server_res, updater_res) = tokio::join!(server, updater);
+    info!("System Ready to receive requests");
+
+    let (server_res, updater_res, _) = tokio::join!(server, updater, async move {
+        info!("Registering CTRL+C handler");
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                info!("Shutting Down");
+                server_shutdown_tx
+                    .send(())
+                    .expect("Unable to shutdown server");
+                updater_shutdown_tx
+                    .send(())
+                    .expect("Unable to shutdown updater");
+            }
+            Err(err) => {
+                eprintln!("Unable to listen for shutdown signal: {}", err);
+                // we also shut down in case of error
+            }
+        }
+        info!("Done")
+    });
+
+    info!("Shutdown Complete");
+    
     server_res.unwrap();
     updater_res.unwrap();
+    info!("Goodbye");
+}
+
+async fn updater_loop(tk: TankerKoenig, prometheus_namespace: String, update_interval: Duration) {
+    let fuel_prices = register_gauge_vec!(
+        format!("{}_fuel_price", prometheus_namespace),
+        "Price of each fuel type",
+        &["name", "brand", "id", "fuel_type"]
+    )
+    .unwrap();
+    let is_open = register_gauge_vec!(
+        format!("{}_is_open", prometheus_namespace),
+        "Is gas station currently open?",
+        &["name", "brand", "id"]
+    )
+    .unwrap();
+    let distance = register_gauge_vec!(
+        format!("{}_distance_km", prometheus_namespace),
+        "Distance from reference point",
+        &["name", "brand", "id"]
+    )
+    .unwrap();
+    let loc_long = register_gauge_vec!(
+        format!("{}_location_long", prometheus_namespace),
+        "Longitude of station",
+        &["name", "brand", "id"]
+    )
+    .unwrap();
+    let loc_lat = register_gauge_vec!(
+        format!("{}_location_lat", prometheus_namespace),
+        "Latitude of station",
+        &["name", "brand", "id"]
+    )
+    .unwrap();
+    let last_update = register_gauge!(
+        format!("{}_update", prometheus_namespace),
+        "Last update in seconds"
+    )
+    .unwrap();
+
+    let mut interval = time::interval(update_interval);
+    loop {
+        interval.tick().await;
+        info!("Fetching prices...");
+        let stations = tk.load_prices().await.unwrap();
+        last_update.set(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64(),
+        );
+
+        for station in &stations {
+            is_open
+                .with_label_values(&[&station.name, &station.brand, &station.id])
+                .set(if station.is_open { 1. } else { 0. });
+            distance
+                .with_label_values(&[&station.name, &station.brand, &station.id])
+                .set(station.dist);
+            loc_lat
+                .with_label_values(&[&station.name, &station.brand, &station.id])
+                .set(station.location.lat);
+            loc_long
+                .with_label_values(&[&station.name, &station.brand, &station.id])
+                .set(station.location.lng);
+            for price in &station.prices {
+                fuel_prices
+                    .with_label_values(&[
+                        &station.name,
+                        &station.brand,
+                        &station.id,
+                        &price.fuel_type.to_string(),
+                    ])
+                    .set(price.price);
+            }
+        }
+        info!("Update Done!");
+    }
 }
