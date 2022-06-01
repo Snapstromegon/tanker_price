@@ -54,10 +54,10 @@ impl From<TankerAPIStation> for TankerStation {
                 (TankerFuelType::Diesel, api_resp.diesel),
                 (TankerFuelType::E5, api_resp.e5),
                 (TankerFuelType::E10, api_resp.e10),
-            ].into_iter()
-            .filter_map(|(fuel_type, price)| {
-                price.and_then(|price| Some(TankerPrice { fuel_type, price }))
-            }).into_iter()
+            ]
+            .into_iter()
+            .filter_map(|(fuel_type, price)| price.map(|price| TankerPrice { fuel_type, price }))
+            .into_iter()
             .collect(),
             location: Coordinate {
                 lng: api_resp.lng,

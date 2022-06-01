@@ -8,7 +8,7 @@
 //! Exposes a prometheus exporter for the [Tankerkönig API](https://creativecommons.tankerkoenig.de/)
 //! which is also able to resolve locations using the [Nominatim openstreetmap.org API](https://nominatim.openstreetmap.org/ui/search.html).
 
-use log::info;
+use log::{error, info};
 use std::{net::SocketAddr, str::FromStr, time::Duration};
 use tokio::time;
 
@@ -150,12 +150,13 @@ async fn main() {
     });
 
     info!("Shutdown Complete");
-    
+
     server_res.unwrap();
     updater_res.unwrap();
     info!("Goodbye");
 }
 
+/// Run this as a loop to regularly update the prometheus metrics
 async fn updater_loop(tk: TankerKoenig, prometheus_namespace: String, update_interval: Duration) {
     let fuel_prices = register_gauge_vec!(
         format!("{}_fuel_price", prometheus_namespace),
@@ -197,38 +198,42 @@ async fn updater_loop(tk: TankerKoenig, prometheus_namespace: String, update_int
     loop {
         interval.tick().await;
         info!("Fetching prices...");
-        let stations = tk.load_prices().await.unwrap();
-        last_update.set(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64(),
-        );
+        let load_result = tk.load_prices().await;
+        if let Ok(stations) = load_result {
+            last_update.set(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64(),
+            );
 
-        for station in &stations {
-            is_open
-                .with_label_values(&[&station.name, &station.brand, &station.id])
-                .set(if station.is_open { 1. } else { 0. });
-            distance
-                .with_label_values(&[&station.name, &station.brand, &station.id])
-                .set(station.dist);
-            loc_lat
-                .with_label_values(&[&station.name, &station.brand, &station.id])
-                .set(station.location.lat);
-            loc_long
-                .with_label_values(&[&station.name, &station.brand, &station.id])
-                .set(station.location.lng);
-            for price in &station.prices {
-                fuel_prices
-                    .with_label_values(&[
-                        &station.name,
-                        &station.brand,
-                        &station.id,
-                        &price.fuel_type.to_string(),
-                    ])
-                    .set(price.price);
+            for station in &stations {
+                is_open
+                    .with_label_values(&[&station.name, &station.brand, &station.id])
+                    .set(if station.is_open { 1. } else { 0. });
+                distance
+                    .with_label_values(&[&station.name, &station.brand, &station.id])
+                    .set(station.dist);
+                loc_lat
+                    .with_label_values(&[&station.name, &station.brand, &station.id])
+                    .set(station.location.lat);
+                loc_long
+                    .with_label_values(&[&station.name, &station.brand, &station.id])
+                    .set(station.location.lng);
+                for price in &station.prices {
+                    fuel_prices
+                        .with_label_values(&[
+                            &station.name,
+                            &station.brand,
+                            &station.id,
+                            &price.fuel_type.to_string(),
+                        ])
+                        .set(price.price);
+                }
             }
+            info!("Update Done!");
+        } else {
+            error!("Update failed: {:?}", load_result);
         }
-        info!("Update Done!");
     }
 }
