@@ -48,27 +48,27 @@ fn arg_validate_radius(radius: &str) -> Result<f64, String> {
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// Location to search prices for
-    #[clap(short, long, env)]
+    #[arg(short, long, env)]
     location: String,
 
     /// Radius around location to search
-    #[clap(short, long, env, default_value_t = 2., parse(try_from_str=arg_validate_radius))]
+    #[arg(short, long, env, default_value_t = 2., value_parser=arg_validate_radius)]
     radius: f64,
 
     /// API Key for the Tankerkönig API
-    #[clap(short = 'k', long, env)]
+    #[arg(short = 'k', long, env)]
     tankerkoenig_key: String,
 
     /// Update Interval in Seconds
-    #[clap(short, long, env, default_value_t = 300, parse(try_from_str=arg_validate_update_time))]
+    #[arg(short, long, env, default_value_t = 300, value_parser=arg_validate_update_time)]
     update_interval: u64,
 
     /// Namespace for all prometheus metrics
-    #[clap(short = 'n', long, env, default_value = "tanker_price")]
+    #[arg(short = 'n', long, env, default_value = "tanker_price")]
     prometheus_namespace: String,
 
     /// Socket address to bind to for the prometheus endpoint
-    #[clap(long, env, default_value = "0.0.0.0:9501")]
+    #[arg(long, env, default_value = "0.0.0.0:9501")]
     listen: SocketAddr,
 }
 
@@ -121,8 +121,8 @@ async fn main() {
         .route("/", get(|| async { Redirect::permanent("/metrics") }));
 
     info!("Starting Server...");
-    let server = axum::Server::bind(&args.listen)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&args.listen).await.expect("Can't start server: Bind failed!");
+    let server = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             server_shutdown_rx.await.ok();
         });

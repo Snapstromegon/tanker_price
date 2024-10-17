@@ -5,7 +5,6 @@
 
 use recoord::Coordinate;
 use serde::Deserialize;
-use std::error::Error;
 use std::fmt::{self, Display};
 
 /// A Tankerkönig station with all required information including prices
@@ -114,26 +113,12 @@ impl Display for TankerPrice {
 }
 
 /// Possible errors of the Tankerkönig API
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TankerError {
-    /// There was a connection error to the API
-    ReqwestError(reqwest::Error),
-    /// The API threw an error
+    #[error("There was a connection error to the API: {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("The API threw an error")]
     APIError(Option<String>),
-}
-
-impl Error for TankerError {}
-
-impl fmt::Display for TankerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl From<reqwest::Error> for TankerError {
-    fn from(err: reqwest::Error) -> Self {
-        Self::ReqwestError(err)
-    }
 }
 
 /// Struct for deserializing the Tankerkönig API response
